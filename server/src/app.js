@@ -30,6 +30,9 @@ import taskRoutes from './routes/task.js';
 import { initWebSocketHandlers, cleanupAllSessions } from './websocket/terminal.js';
 import { cleanupAllMonitorConnections } from './websocket/monitor.js';
 
+// ========== 进程管理工具导入 ==========
+import { optimizeProcessSettings, startProcessMaintenance, safeProcessExit } from './utils/processManager.js';
+
 // ========== 应用和服务器初始化 ==========
 const app = express()
 const options = {
@@ -118,6 +121,12 @@ initWebSocketHandlers(wss)
 // ========== 服务器启动 ==========
 const startServer = async () => {
   try {
+    // 优化进程设置
+    optimizeProcessSettings()
+    
+    // 启动进程维护任务
+    startProcessMaintenance()
+    
     initDatabase()
     logger.info('数据库初始化完成')
     await insertInitialData()
@@ -236,13 +245,10 @@ process.on('uncaughtException', async (error) => {
     await logger.flushAll();
   } catch (closeError) {
     logger.error('关闭日志存储时出错: ' + closeError.message);
-    throw closeError;
   }
 
-  // 给日志一些时间写入
-  setTimeout(() => {
-    process.exit(1);
-  }, 1000);
+  // 使用安全退出
+  await safeProcessExit(1);
 });
 
 // 未处理的Promise拒绝处理
@@ -254,13 +260,10 @@ process.on('unhandledRejection', async (reason, promise) => {
     await logger.flushAll()
   } catch (closeError) {
     logger.error('关闭日志存储时出错: ' + closeError.message)
-    throw closeError;
   }
 
-  // 给日志一些时间写入
-  setTimeout(() => {
-    process.exit(1)
-  }, 1000)
+  // 使用安全退出
+  await safeProcessExit(1);
 })
 
 

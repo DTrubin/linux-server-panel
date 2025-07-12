@@ -5,6 +5,54 @@ import url from 'url';
 const terminalSessions = new Map()
 
 /**
+ * 清理进程的辅助函数
+ */
+function cleanupProcess(childProcess, sessionId) {
+  if (!childProcess || childProcess.killed) {
+    return
+  }
+
+  try {
+    // 根据平台使用不同的终止策略
+    if (process.platform === 'win32') {
+      // Windows平台
+      childProcess.kill('SIGTERM')
+      setTimeout(() => {
+        if (!childProcess.killed) {
+          childProcess.kill('SIGKILL')
+        }
+      }, 3000)
+    } else {
+      // Linux/Unix平台
+      // 如果进程是分离的，需要杀死整个进程组
+      if (childProcess.pid) {
+        try {
+          // 尝试优雅关闭整个进程组
+          process.kill(-childProcess.pid, 'SIGTERM')
+          setTimeout(() => {
+            try {
+              process.kill(-childProcess.pid, 'SIGKILL')
+            } catch (killError) {
+              // 忽略已经不存在的进程
+            }
+          }, 3000)
+        } catch (error) {
+          // 如果进程组不存在，直接杀死进程
+          childProcess.kill('SIGTERM')
+          setTimeout(() => {
+            if (!childProcess.killed) {
+              childProcess.kill('SIGKILL')
+            }
+          }, 3000)
+        }
+      }
+    }
+  } catch (error) {
+    wsLogger.error('清理终端进程时出错', { sessionId, error: error.message })
+  }
+}
+
+/**
  * 处理终端WebSocket连接
  */
 function handleTerminalConnection(ws, req, parsedUrl) {
@@ -24,7 +72,12 @@ function handleTerminalConnection(ws, req, parsedUrl) {
       ]
     } else {
       shell = 'bash'
-      shellArgs = ['--login', '-i']
+      shellArgs = [
+        '--login', 
+        '-i',
+        '-c',
+        'exec bash --login -i'  // 使用exec避免子shell问题
+      ]
     }
 
     // 创建子进程
@@ -35,6 +88,12 @@ function handleTerminalConnection(ws, req, parsedUrl) {
       processEnv.CHCP = '65001'  // UTF-8代码页
       processEnv.LC_ALL = 'zh_CN.UTF-8'
       processEnv.LANG = 'zh_CN.UTF-8'
+    } else {
+      // Linux环境设置
+      processEnv.TERM = 'xterm-256color'
+      processEnv.SHELL = '/bin/bash'
+      processEnv.LC_ALL = 'en_US.UTF-8'
+      processEnv.LANG = 'en_US.UTF-8'
     }
 
     // 确定初始工作目录
@@ -43,7 +102,9 @@ function handleTerminalConnection(ws, req, parsedUrl) {
     const childProcess = spawn(shell, shellArgs, {
       cwd: initialCwd,
       env: processEnv,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32', // Linux上分离进程组
+      shell: false  // 直接执行，不通过shell
     })
 
     // 存储会话
@@ -103,13 +164,14 @@ function handleTerminalConnection(ws, req, parsedUrl) {
         }
         ws.send(JSON.stringify(exitMessage))
         wsLogger.info(`发送终端退出消息`, { sessionId, exitCode, messageType: 'terminal_exit' })
-        ws.close(1000, 'Terminal process ended')
+        // 不要立即关闭WebSocket，让客户端决定
       }
     })
 
     // 处理进程错误
     childProcess.on('error', (error) => {
       wsLogger.error(`终端进程错误`, { sessionId, error: error.message })
+      terminalSessions.delete(sessionId)
       if (ws.readyState === ws.OPEN) {
         const errorMessage = {
           type: 'terminal_error',
@@ -119,6 +181,11 @@ function handleTerminalConnection(ws, req, parsedUrl) {
         wsLogger.error(`发送终端错误消息`, { sessionId, error: error.message, messageType: 'terminal_error' })
       }
     })
+
+    // 防止进程变成僵尸进程
+    if (process.platform !== 'win32') {
+      childProcess.unref()
+    }
 
     // 处理WebSocket消息
     ws.on('message', (data) => {
@@ -178,13 +245,7 @@ function handleTerminalConnection(ws, req, parsedUrl) {
       wsLogger.info(`终端WebSocket连接已关闭`, { sessionId, code, reason })
       if (terminalSessions.has(sessionId)) {
         const session = terminalSessions.get(sessionId)
-        try {
-          if (session.process && !session.process.killed) {
-            session.process.kill('SIGTERM')
-          }
-        } catch (error) {
-          wsLogger.error('杀死终端进程时出错', { sessionId, error: error.message })
-        }
+        cleanupProcess(session.process, sessionId)
         terminalSessions.delete(sessionId)
       }
     })
@@ -194,13 +255,7 @@ function handleTerminalConnection(ws, req, parsedUrl) {
       wsLogger.error(`终端WebSocket错误`, { sessionId, error: error.message })
       if (terminalSessions.has(sessionId)) {
         const session = terminalSessions.get(sessionId)
-        try {
-          if (session.process && !session.process.killed) {
-            session.process.kill('SIGTERM')
-          }
-        } catch (killError) {
-          wsLogger.error('杀死终端进程时出错', { sessionId, error: killError.message })
-        }
+        cleanupProcess(session.process, sessionId)
         terminalSessions.delete(sessionId)
       }
     })
@@ -283,15 +338,9 @@ function initWebSocketHandlers(wss) {
       // 清理超过 30 分钟的会话
       if (age > 30 * 60 * 1000) {
         wsLogger.info(`清理过期的终端会话`, { sessionId, age })
-        try {
-          if (session.process && !session.process.killed) {
-            session.process.kill('SIGTERM')
-          }
-          if (session.ws.readyState === session.ws.OPEN) {
-            session.ws.close(1000, 'Session expired')
-          }
-        } catch (error) {
-          wsLogger.error('清理终端会话时出错', { sessionId, error: error.message })
+        cleanupProcess(session.process, sessionId)
+        if (session.ws.readyState === session.ws.OPEN) {
+          session.ws.close(1000, 'Session expired')
         }
         terminalSessions.delete(sessionId)
       }
@@ -334,27 +383,25 @@ function cleanupAllSessions() {
   for (const [sessionId, session] of terminalSessions.entries()) {
     cleanup.push(new Promise((resolve) => {
       try {
-        // 强制杀死子进程
-        if (session.process && !session.process.killed) {
-          // 先尝试优雅关闭
-          session.process.kill('SIGTERM');
-
-          // 设置超时后强制杀死
-          setTimeout(() => {
-            if (!session.process.killed) {
-              session.process.kill('SIGKILL');
-            }
-            resolve();
-          }, 3000);
-
-          session.process.once('exit', resolve);
-        } else {
-          resolve();
-        }
-
         // 关闭WebSocket连接
         if (session.ws.readyState === session.ws.OPEN) {
           session.ws.close(1000, 'Server shutting down');
+        }
+
+        // 清理进程
+        if (session.process && !session.process.killed) {
+          // 监听进程退出事件
+          session.process.once('exit', resolve);
+          
+          // 使用新的清理函数
+          cleanupProcess(session.process, sessionId);
+          
+          // 设置超时后强制resolve
+          setTimeout(() => {
+            resolve();
+          }, 5000);
+        } else {
+          resolve();
         }
       } catch (error) {
         wsLogger.error('清理终端会话时出错', { sessionId, error: error.message });
