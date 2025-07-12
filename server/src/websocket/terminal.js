@@ -230,6 +230,7 @@ function initWebSocketHandlers(wss) {
     const clientIP = req.socket.remoteAddress
 
     wsLogger.info('新的WebSocket连接已建立', { pathname, clientIP })
+    logger.info('新的WebSocket连接已建立', { pathname, clientIP })
 
     // 判断连接类型
     if (pathname.startsWith('/terminal/')) {

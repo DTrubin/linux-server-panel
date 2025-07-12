@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useTerminalWebSocket, type WebSocketMessage } from '@/utils/websocket'
 import { environmentManager } from '@/config/environment'
@@ -348,7 +348,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', updateTerminalSize)
   stopCursorBlink()
-  disconnect()
+  disconnectTerminal()
 })
 </script>
 
