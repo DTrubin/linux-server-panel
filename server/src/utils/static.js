@@ -1,6 +1,6 @@
-
 import express from 'express'
 import fs from 'fs'
+import path from 'path'
 import { createServer } from 'https'
 
 const app = express()
@@ -10,11 +10,19 @@ const options = {
 }
 
 const PORT = global.__config.staticPort || 8080
+const logger = global.logger
 
 const server = createServer(options, app)
 
 // ========== 静态文件服务 ==========
 app.use('/', express.static('../panel/dist'))
+
+// ========== 404 处理 ==========
+app.use('*', (req, res) => {
+    // 对于SPA应用，所有未找到的路由都返回index.html
+    // 让前端路由处理
+    res.sendFile(path.resolve('../panel/dist/index.html'))
+})
 
 export async function startStaticServer() {
     server.listen(PORT, () => {

@@ -1,7 +1,8 @@
 import axios from '@/utils/axios'
 import axiosLib from 'axios'
 import { useAuthStore } from '@/store/modules/auth'
-import { SERVER_PORT, API_BASE_URL } from '@/config/constants'
+import { environmentManager } from '@/config/environment'
+import { API_BASE_URL } from '@/config/constants'
 import type {
   FileItem,
   UploadParams,
@@ -29,7 +30,7 @@ import type {
 
 // 创建一个专门用于文件下载的axios实例
 const downloadAxios = axiosLib.create({
-  baseURL: `http://127.0.0.1:${SERVER_PORT}${API_BASE_URL}`,
+  baseURL: environmentManager.getApiBaseUrl(),
   timeout: 30000 // 下载可能需要更长时间
 })
 

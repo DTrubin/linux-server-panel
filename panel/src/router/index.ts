@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory, type Router } from 'vue-router'
+import { createRouter, createWebHistory, type Router } from 'vue-router'
 import { useAuthStore } from '@/store/modules/auth'
 import { ChartManager } from '@/utils/chartManager'
 import { globalWebSocketManager } from '@/utils/globalWebSocketManager'
@@ -8,7 +8,7 @@ import { staticRoutes, dynamicRoutes } from './routes'
 const allRoutes = [...staticRoutes, ...dynamicRoutes]
 
 const router: Router = createRouter({
-  history: createWebHashHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: allRoutes // 直接加载所有路由
 })
 

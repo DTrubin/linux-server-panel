@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SystemResourceData, ResourceHistory } from '@/types/systemResource'
+import { environmentManager } from '@/config/environment'
 
 export const useSystemResourceStore = defineStore('systemResource', () => {
   // 当前系统资源数据
@@ -197,11 +198,8 @@ export const useSystemResourceStore = defineStore('systemResource', () => {
     isManualDisconnect = false // 重置手动断开标志
 
     try {
-      // 使用正确的后端 WebSocket 地址
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const host = window.location.hostname
-      const port = import.meta.env.DEV ? '3000' : window.location.port
-      const wsUrl = `${protocol}//${host}:${port}/monitor/system-resources`
+      // 使用环境管理器获取WebSocket地址
+      const wsUrl = environmentManager.buildWebSocketUrl('/monitor/system-resources')
 
       ws = new WebSocket(wsUrl)
 

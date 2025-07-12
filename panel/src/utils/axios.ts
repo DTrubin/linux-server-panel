@@ -1,10 +1,10 @@
 import axios from 'axios'
 import { useAuthStore } from '@/store/modules/auth'
-import { SERVER_PORT, API_BASE_URL } from '@/config/constants'
+import { environmentManager } from '@/config/environment'
 
 // 创建axios实例
 const service = axios.create({
-  baseURL: `https://127.0.0.1:${SERVER_PORT}${API_BASE_URL}`,
+  baseURL: environmentManager.getApiBaseUrl(),
   timeout: 5000
 })
 

@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useTerminalWebSocket, type WebSocketMessage } from '@/utils/websocket'
+import { environmentManager } from '@/config/environment'
 
 // 响应式数据
 const terminalContainer = ref<HTMLElement>()
@@ -32,8 +33,7 @@ const { isConnected: wsConnected, messages, connect, disconnect, sendMessage } =
 
 // 计算属性
 const terminalUrl = (() => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.hostname}:3000/terminal/${currentServer.value}`
+  return environmentManager.buildWebSocketUrl(`/terminal/${currentServer.value}`)
 })()
 
 // 格式化终端行

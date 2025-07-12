@@ -1,10 +1,6 @@
 // 全局常量配置文件
 // 用于存放项目中通用的常量，如端口号、应用名等
 
-// 端口相关
-export const SERVER_PORT = 3000
-export const WS_PORT = 3001
-
 // 应用信息
 export const APP_TITLE = 'Linux Panel'
 export const APP_VERSION = '1.0.0(beta)'
@@ -28,4 +24,8 @@ export const DEFAULT_TIMEZONE = 'Asia/Shanghai'
 export const DEFAULT_SESSION_TIMEOUT = 3600 // 秒
 export const MAX_LOG_SIZE = 1000
 export const MAX_CONNECTIONS = 100
+
+// 开发环境默认端口（仅用于开发）
+export const DEV_SERVER_PORT = 3000
+export const DEV_WS_PORT = 3001
 
