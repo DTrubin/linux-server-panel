@@ -1,17 +1,7 @@
 <template>
-  <el-dialog
-    :model-value="visible"
-    @update:model-value="$emit('update:visible', $event)"
-    :title="isEditMode ? '编辑任务' : '创建任务'"
-    width="800px"
-    @close="resetForm"
-  >
-    <el-form
-      ref="taskFormRef"
-      :model="taskForm"
-      :rules="taskFormRules"
-      label-width="100px"
-    >
+  <el-dialog :model-value="visible" @update:model-value="$emit('update:visible', $event)"
+    :title="isEditMode ? '编辑任务' : '创建任务'" width="800px" @close="resetForm">
+    <el-form ref="taskFormRef" :model="taskForm" :rules="taskFormRules" label-width="100px">
       <el-row :gutter="20">
         <el-col :span="12">
           <el-form-item label="任务名称" prop="name">
@@ -31,21 +21,11 @@
       </el-row>
 
       <el-form-item label="描述">
-        <el-input
-          v-model="taskForm.description"
-          type="textarea"
-          :rows="3"
-          placeholder="请输入任务描述"
-        />
+        <el-input v-model="taskForm.description" type="textarea" :rows="3" placeholder="请输入任务描述" />
       </el-form-item>
 
       <el-form-item label="执行命令" prop="command">
-        <el-input
-          v-model="taskForm.command"
-          type="textarea"
-          :rows="4"
-          placeholder="请输入要执行的命令"
-        />
+        <el-input v-model="taskForm.command" type="textarea" :rows="4" placeholder="请输入要执行的命令" />
       </el-form-item>
 
       <el-row :gutter="20">
@@ -69,38 +49,24 @@
       <!-- 调度设置 -->
       <el-divider content-position="left">调度设置</el-divider>
       <el-form-item label="触发类型">
-        <el-radio-group v-model="scheduleForm.triggerType">
+        <el-radio-group v-model="scheduleForm.triggerType" @change="onTriggerTypeChange">
           <el-radio value="manual">手动执行</el-radio>
           <el-radio value="cron">Cron表达式</el-radio>
           <el-radio value="interval">定时间隔</el-radio>
         </el-radio-group>
       </el-form-item>
 
-      <el-form-item
-        v-if="scheduleForm.triggerType === 'cron'"
-        label="Cron表达式"
-        prop="cronExpression"
-      >
-        <el-input
-          v-model="scheduleForm.cronExpression"
-          placeholder="例如: 0 0 * * * (每天零点执行)"
-        />
+      <el-form-item v-if="scheduleForm.triggerType === 'cron'" label="Cron表达式" :error="cronError">
+        <el-input v-model="scheduleForm.cronExpression" placeholder="例如: 0 0 * * * (每天零点执行)"
+                  @input="cronError = ''" />
         <div class="form-tip">
           格式: 秒 分 时 日 月 周 年
         </div>
       </el-form-item>
 
-      <el-form-item
-        v-if="scheduleForm.triggerType === 'interval'"
-        label="间隔时间"
-        prop="interval"
-      >
-        <el-input-number
-          v-model="scheduleForm.interval"
-          :min="60"
-          :step="60"
-          placeholder="秒"
-        />
+      <el-form-item v-if="scheduleForm.triggerType === 'interval'" label="间隔时间" :error="intervalError">
+        <el-input-number v-model="scheduleForm.interval" :min="1" :step="60" placeholder="秒"
+                         @change="intervalError = ''" />
         <span style="margin-left: 8px">秒</span>
       </el-form-item>
 
@@ -157,6 +123,10 @@ const scheduleForm = reactive({
   interval: 3600
 })
 
+// 错误状态
+const cronError = ref('')
+const intervalError = ref('')
+
 // 表单验证规则
 const taskFormRules = {
   name: [
@@ -167,30 +137,6 @@ const taskFormRules = {
   ],
   command: [
     { required: true, message: '请输入执行命令', trigger: 'blur' }
-  ],
-  cronExpression: [
-    {
-      validator: (rule: any, value: string, callback: Function) => {
-        if (scheduleForm.triggerType === 'cron' && !value) {
-          callback(new Error('请输入Cron表达式'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
-  ],
-  interval: [
-    {
-      validator: (rule: any, value: number, callback: Function) => {
-        if (scheduleForm.triggerType === 'interval' && (!value || value < 60)) {
-          callback(new Error('间隔时间不能少于60秒'))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
   ]
 }
 
@@ -225,9 +171,32 @@ const closeDialog = () => {
   emit('update:visible', false)
 }
 
+const onTriggerTypeChange = () => {
+  cronError.value = ''
+  intervalError.value = ''
+}
+
 const handleSave = async () => {
   try {
+    // 清空之前的错误状态
+    cronError.value = ''
+    intervalError.value = ''
+
+    // 验证基本表单
     await taskFormRef.value?.validate()
+
+    // 验证调度设置
+    if (scheduleForm.triggerType === 'cron' && !scheduleForm.cronExpression.trim()) {
+      cronError.value = '请输入Cron表达式'
+      return
+    }
+
+    if (scheduleForm.triggerType === 'interval') {
+      if (!scheduleForm.interval || scheduleForm.interval < 1) {
+        intervalError.value = '间隔时间不能少于1秒'
+        return
+      }
+    }
 
     const taskData = {
       ...taskForm,
@@ -247,6 +216,8 @@ const handleSave = async () => {
 
 const resetForm = () => {
   taskFormRef.value?.clearValidate()
+  cronError.value = ''
+  intervalError.value = ''
 }
 </script>
 

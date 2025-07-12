@@ -5,6 +5,7 @@ import { spawn } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
 import cron from 'node-cron'
 import { logAuditEvent } from '../middleware/auditLogger.js'
+import { clear } from 'console'
 
 const router = express.Router()
 
@@ -33,13 +34,13 @@ const readTasks = async () => {
   try {
     const data = await fs.readFile(TASKS_FILE, 'utf8')
     const tasks = JSON.parse(data)
-    
+
     // 验证数据格式
     if (!Array.isArray(tasks)) {
       logger.warn('任务数据格式不正确，重置为空数组')
       return []
     }
-    
+
     return tasks
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -51,13 +52,13 @@ const readTasks = async () => {
     } else if (error instanceof SyntaxError) {
       // JSON格式错误
       logger.error('任务文件JSON格式错误，备份损坏文件并重置', error)
-      
+
       try {
         // 备份损坏的文件
         const backupFile = `${TASKS_FILE}.backup.${Date.now()}`
         await fs.copyFile(TASKS_FILE, backupFile)
         logger.info(`已备份损坏的任务文件到: ${backupFile}`)
-        
+
         // 重置为空数组
         const emptyTasks = []
         await writeTasks(emptyTasks)
@@ -76,24 +77,22 @@ const readTasks = async () => {
 // 写入任务数据 - 添加原子性操作和错误处理
 const writeTasks = async (tasks) => {
   const tempFile = TASKS_FILE + '.tmp'
-  
+
   try {
     // 验证数据格式
     if (!Array.isArray(tasks)) {
       throw new Error('任务数据必须是数组格式')
     }
-    
+
     // 先写入临时文件
     const jsonData = JSON.stringify(tasks, null, 2)
     await fs.writeFile(tempFile, jsonData)
-    
+
     // 验证写入的JSON是否有效
     await fs.readFile(tempFile, 'utf8').then(data => JSON.parse(data))
-    
+
     // 原子性替换原文件
     await fs.rename(tempFile, TASKS_FILE)
-    
-    logger.info(`成功写入任务数据，共 ${tasks.length} 个任务`)
   } catch (error) {
     // 清理临时文件
     try {
@@ -101,7 +100,7 @@ const writeTasks = async (tasks) => {
     } catch (unlinkError) {
       // 忽略删除临时文件的错误
     }
-    
+
     logger.error('写入任务数据失败', error)
     throw new Error(`写入任务数据失败: ${error.message}`)
   }
@@ -258,40 +257,162 @@ const executeTaskById = async (taskId, triggeredBy = 'manual') => {
 
 // 设置定时任务
 const scheduleTask = (task, schedule) => {
-  if (schedule.triggerType === 'cron' && schedule.cronExpression) {
-    const cronTask = cron.schedule(schedule.cronExpression, () => {
-      executeTaskById(task.id, 'cron').catch(err => {
-        logger.error(`定时任务执行失败: ${task.name}`, err)
-      })
-    }, {
-      scheduled: false
-    })
+  logger.info(`开始设置任务 ${task.name} 的定时任务，类型: ${schedule.triggerType}`)
 
-    scheduledTasks.set(task.id, cronTask)
-    if (task.enabled) {
+  if (!task.enabled) {
+    return false
+  }
+
+  if (schedule.triggerType === 'cron' && schedule.cronExpression) {
+    try {
+      logger.info(`创建Cron任务: ${task.name}, 表达式: ${schedule.cronExpression}`)
+
+      // 验证Cron表达式格式
+      if (!cron.validate(schedule.cronExpression)) {
+        throw new Error(`无效的Cron表达式: ${schedule.cronExpression}`)
+      }
+
+      const cronTask = cron.schedule(schedule.cronExpression, () => {
+        logger.info(`Cron任务触发: ${task.name}`)
+        executeTaskById(task.id, 'cron').catch(err => {
+          logger.error(`定时任务执行失败: ${task.name}`, err)
+        })
+      }, {
+        scheduled: false
+      })
+
+      scheduledTasks.set(task.id, cronTask)
       cronTask.start()
+
+      // 验证任务是否成功添加
+      if (scheduledTasks.has(task.id)) {
+        logger.info(`✅ 已设置Cron定时任务: ${task.name} (${schedule.cronExpression})`)
+        return true
+      } else {
+        throw new Error('任务未能成功添加到调度管理器')
+      }
+    } catch (error) {
+      logger.error(`❌ 设置Cron定时任务失败: ${task.name}`, error)
+      // 清理可能的残留
+      scheduledTasks.delete(task.id)
+      return false
     }
   } else if (schedule.triggerType === 'interval' && schedule.interval) {
-    const intervalTask = setInterval(() => {
-      executeTaskById(task.id, 'interval').catch(err => {
-        logger.error(`定时任务执行失败: ${task.name}`, err)
-      })
-    }, schedule.interval * 1000)
+    try {
+      logger.info(`创建间隔任务: ${task.name}, 间隔: ${schedule.interval}秒`)
 
-    scheduledTasks.set(task.id, intervalTask)
+      // 验证间隔时间
+      if (schedule.interval <= 0) {
+        throw new Error(`无效的间隔时间: ${schedule.interval}`)
+      }
+
+      const intervalTask = setInterval(() => {
+        executeTaskById(task.id, 'interval').catch(err => {
+          logger.error(`定时任务执行失败: ${task.name}`, err)
+        })
+      }, schedule.interval * 1000)
+
+      scheduledTasks.set(task.id, intervalTask)
+
+      // 验证任务是否成功添加
+      if (scheduledTasks.has(task.id)) {
+        logger.info(`✅ 已设置间隔定时任务: ${task.name} (${schedule.interval}秒)`)
+        return true
+      } else {
+        throw new Error('任务未能成功添加到调度管理器')
+      }
+    } catch (error) {
+      logger.error(`❌ 设置间隔定时任务失败: ${task.name}`, error)
+      // 清理可能的残留
+      if (scheduledTasks.has(task.id)) {
+        const task = scheduledTasks.get(task.id)
+        if (typeof task === 'number') {
+          clearInterval(task)
+        }
+        scheduledTasks.delete(task.id)
+      }
+      return false
+    }
+  } else {
+    logger.warn(`⚠️ 无效的调度配置: ${task.name}, 类型: ${schedule.triggerType}`)
+    return false
   }
 }
 
 // 取消定时任务
 const unscheduleTask = (taskId) => {
-  const scheduledTask = scheduledTasks.get(taskId)
-  if (scheduledTask) {
-    if (typeof scheduledTask.destroy === 'function') {
-      scheduledTask.destroy()
-    } else if (typeof scheduledTask === 'number') {
-      clearInterval(scheduledTask)
+  const task = scheduledTasks.get(taskId)
+  if (!task) {
+    return
+  }
+
+  // 如果是Cron任务
+  if (task.stop) {
+    logger.info(`取消Cron任务: ${taskId}`)
+    task.stop()
+    return
+  }
+
+  scheduledTasks.delete(taskId)
+
+  // 如果是间隔任务
+  logger.info(`取消间隔任务: ${taskId}`)
+  clearInterval(task)
+}
+
+// 验证定时任务一致性
+const validateScheduledTasksConsistency = async () => {
+  try {
+    const tasks = await readTasks()
+    const enabledScheduledTasks = tasks.filter(task =>
+      task.enabled &&
+      task.schedule &&
+      task.schedule.triggerType !== 'manual'
+    )
+
+    logger.info(`🔍 开始验证定时任务一致性`)
+    logger.info(`📋 应该有定时任务的任务数: ${enabledScheduledTasks.length}`)
+    logger.info(`💾 实际内存中的定时任务数: ${scheduledTasks.size}`)
+
+    // 检查应该有但没有的任务
+    const missingTasks = []
+    for (const task of enabledScheduledTasks) {
+      if (!scheduledTasks.has(task.id)) {
+        missingTasks.push(task)
+      }
     }
-    scheduledTasks.delete(taskId)
+
+    // 检查不应该有但存在的任务
+    const extraTasks = []
+    for (const [taskId] of scheduledTasks) {
+      const task = tasks.find(t => t.id === taskId)
+      if (!task || !task.enabled || !task.schedule || task.schedule.triggerType === 'manual') {
+        extraTasks.push(taskId)
+      }
+    }
+
+    if (missingTasks.length > 0) {
+      logger.warn(`⚠️ 发现缺失的定时任务: ${missingTasks.map(t => `${t.name}(${t.id})`).join(', ')}`)
+    }
+
+    if (extraTasks.length > 0) {
+      logger.warn(`⚠️ 发现多余的定时任务: ${extraTasks.join(', ')}`)
+    }
+
+    if (missingTasks.length === 0 && extraTasks.length === 0) {
+      logger.info(`✅ 定时任务一致性验证通过`)
+    }
+
+    return {
+      consistent: missingTasks.length === 0 && extraTasks.length === 0,
+      missingTasks,
+      extraTasks,
+      expectedCount: enabledScheduledTasks.length,
+      actualCount: scheduledTasks.size
+    }
+  } catch (error) {
+    logger.error(`❌ 验证定时任务一致性失败`, error)
+    return null
   }
 }
 
@@ -386,14 +507,14 @@ router.get('/detail', async (req, res) => {
         message: '任务ID不能为空'
       })
     }
-    
+
     const tasks = await readTasks()
     const task = tasks.find(t => t.id === id)
 
     if (!task) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: '任务不存在' 
+        message: '任务不存在'
       })
     }
 
@@ -428,7 +549,7 @@ router.post('/', async (req, res) => {
     } = req.body
 
     if (!name || !command) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
         message: '任务名称和命令不能为空',
         errors: {
@@ -466,10 +587,10 @@ router.post('/', async (req, res) => {
           message: 'Cron触发类型必须提供cron表达式'
         })
       }
-      if (schedule.triggerType === 'interval' && (!schedule.interval || schedule.interval < 60)) {
+      if (schedule.triggerType === 'interval' && (!schedule.interval || schedule.interval < 1)) {
         return res.status(400).json({
           success: false,
-          message: '间隔触发类型的间隔时间不能少于60秒'
+          message: '间隔触发类型的间隔时间不能少于1秒'
         })
       }
     }
@@ -490,7 +611,8 @@ router.post('/', async (req, res) => {
       priority,
       createdAt: now,
       createdBy: req.user?.username || 'system',
-      enabled
+      enabled,
+      schedule: schedule || { triggerType: 'manual' }
     }
 
     const tasks = await readTasks()
@@ -527,7 +649,7 @@ router.post('/', async (req, res) => {
     })
   } catch (error) {
     logger.error('创建任务失败', error)
-    
+
     // 返回详细的错误信息
     let errorMessage = '创建任务失败'
     if (error.code === 'EACCES') {
@@ -537,7 +659,7 @@ router.post('/', async (req, res) => {
     } else if (error.message) {
       errorMessage = `创建任务失败: ${error.message}`
     }
-    
+
     res.status(500).json({
       success: false,
       message: errorMessage,
@@ -556,14 +678,14 @@ router.put('/update', async (req, res) => {
         message: '任务ID不能为空'
       })
     }
-    
+
     const tasks = await readTasks()
     const taskIndex = tasks.findIndex(t => t.id === id)
 
     if (taskIndex === -1) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: '任务不存在' 
+        message: '任务不存在'
       })
     }
 
@@ -573,17 +695,41 @@ router.put('/update', async (req, res) => {
       ...req.body,
       id: existingTask.id,
       createdAt: existingTask.createdAt,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
+      // 如果没有提供schedule，保持原有的schedule
+      schedule: req.body.schedule || existingTask.schedule || { triggerType: 'manual' }
     }
 
     tasks[taskIndex] = updatedTask
     await writeTasks(tasks)
 
-    // 重新设置定时任务
+    // 记录更新前的状态
+    const oldScheduleType = existingTask.schedule?.triggerType || 'manual'
+    const newScheduleType = updatedTask.schedule?.triggerType || 'manual'
+    logger.info(`任务调度变更: ${existingTask.name} 从 ${oldScheduleType} 变更为 ${newScheduleType}`)
+
+
+    // 删除之前的定时任务
     unscheduleTask(existingTask.id)
-    if (req.body.schedule && req.body.schedule.triggerType !== 'manual') {
-      scheduleTask(updatedTask, req.body.schedule)
-    }
+
+    // 创建新的定时任务 (跳过内部的unschedule调用，因为我们已经手动删除了)
+    scheduleTask(updatedTask, updatedTask.schedule)
+
+    // 记录审计日志
+    await logAuditEvent(
+      req.user?.id || 'system',
+      'UPDATE_TASK',
+      'task_management',
+      {
+        taskId: existingTask.id,
+        taskName: updatedTask.name,
+        oldSchedule: existingTask.schedule,
+        newSchedule: updatedTask.schedule,
+        enabled: updatedTask.enabled
+      },
+      'info',
+      req
+    );
 
     logger.info(`更新任务成功: ${updatedTask.name}`)
     res.json({
@@ -610,18 +756,18 @@ router.delete('/remove', async (req, res) => {
         message: '任务ID不能为空'
       })
     }
-    
+
     const taskId = id
     logger.info(`开始删除任务: ${taskId}`)
-    
+
     const tasks = await readTasks()
     const taskIndex = tasks.findIndex(t => t.id === taskId)
 
     if (taskIndex === -1) {
       logger.warn(`尝试删除不存在的任务: ${taskId}`)
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: '任务不存在' 
+        message: '任务不存在'
       })
     }
 
@@ -648,17 +794,17 @@ router.delete('/remove', async (req, res) => {
     // 删除任务
     const originalLength = tasks.length
     tasks.splice(taskIndex, 1)
-    
+
     // 验证删除操作
     if (tasks.length !== originalLength - 1) {
       throw new Error('删除操作验证失败')
     }
-    
+
     await writeTasks(tasks)
 
     logger.info(`成功删除任务: ${task.name}, 剩余任务数: ${tasks.length}`)
-    
-    res.json({ 
+
+    res.json({
       success: true,
       message: '任务删除成功',
       data: {
@@ -680,7 +826,7 @@ router.delete('/remove', async (req, res) => {
 router.delete('/batch', async (req, res) => {
   try {
     const { taskIds } = req.body
-    
+
     if (!taskIds || !Array.isArray(taskIds) || taskIds.length === 0) {
       return res.status(400).json({
         success: false,
@@ -689,7 +835,7 @@ router.delete('/batch', async (req, res) => {
     }
 
     logger.info(`开始批量删除任务: ${taskIds.join(', ')}`)
-    
+
     const tasks = await readTasks()
     const results = {
       success: [],
@@ -702,14 +848,14 @@ router.delete('/batch', async (req, res) => {
     const tasksToDelete = []
     for (const taskId of taskIds) {
       const taskIndex = tasks.findIndex(t => t.id === taskId)
-      
+
       if (taskIndex === -1) {
         results.notFound.push(taskId)
         continue
       }
 
       const task = tasks[taskIndex]
-      
+
       // 检查任务是否正在运行
       if (task.status === 'running') {
         results.running.push({
@@ -741,12 +887,12 @@ router.delete('/batch', async (req, res) => {
 
         // 从数组中删除任务
         tasks.splice(index, 1)
-        
+
         results.success.push({
           id: task.id,
           name: task.name
         })
-        
+
         logger.info(`成功删除任务: ${task.name} (${task.id})`)
       } catch (error) {
         logger.error(`删除任务失败: ${task.name}`, error)
@@ -782,7 +928,7 @@ router.delete('/batch', async (req, res) => {
     const statusCode = isSuccess ? 200 : (results.success.length > 0 ? 207 : 400) // 207: Multi-Status
 
     logger.info(`批量删除任务完成: ${messages.join(', ')}, 剩余任务数: ${tasks.length}`)
-    
+
     res.status(statusCode).json({
       success: isSuccess,
       message: messages.join(', '),
@@ -812,14 +958,14 @@ router.post('/execute', async (req, res) => {
         message: '任务ID不能为空'
       })
     }
-    
+
     const tasks = await readTasks()
     const task = tasks.find(t => t.id === id)
 
     if (!task) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: '任务不存在' 
+        message: '任务不存在'
       })
     }
 
@@ -1021,8 +1167,21 @@ router.get('/statistics/overview', async (req, res) => {
 // 启动时恢复定时任务
 const restoreScheduledTasks = async () => {
   try {
-    await readTasks()
-    logger.info('定时任务恢复完成')
+    const tasks = await readTasks()
+    let restoredCount = 0
+
+    for (const task of tasks) {
+      if (task.enabled && task.schedule && task.schedule.triggerType !== 'manual') {
+        try {
+          scheduleTask(task, task.schedule)
+          restoredCount++
+        } catch (error) {
+          logger.error(`恢复任务 ${task.name} 的定时任务失败`, error)
+        }
+      }
+    }
+
+    logger.info(`定时任务恢复完成，共恢复 ${restoredCount} 个定时任务`)
   } catch (error) {
     logger.error('恢复定时任务失败', error)
   }
@@ -1030,5 +1189,238 @@ const restoreScheduledTasks = async () => {
 
 // 启动时恢复定时任务
 restoreScheduledTasks()
+
+// 启用/禁用任务
+router.patch('/toggle', async (req, res) => {
+  try {
+    const { id, enabled } = req.body
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: '任务ID不能为空'
+      })
+    }
+
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: '启用状态必须是布尔值'
+      })
+    }
+
+    const tasks = await readTasks()
+    const taskIndex = tasks.findIndex(t => t.id === id)
+
+    if (taskIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: '任务不存在'
+      })
+    }
+
+    const task = tasks[taskIndex]
+    const oldEnabled = task.enabled
+
+    // 更新任务状态
+    task.enabled = enabled
+    task.updatedAt = new Date().toISOString()
+
+    tasks[taskIndex] = task
+    await writeTasks(tasks)
+
+    // 根据新的enabled状态处理定时任务
+    if (task.schedule && task.schedule.triggerType !== 'manual') {
+      if (enabled && !oldEnabled) {
+        // 从禁用变为启用：设置定时任务
+        logger.info(`任务 ${task.name} 从禁用变为启用，设置定时任务`)
+        scheduleTask(task, task.schedule, false) // 不跳过unschedule，确保清理
+        logger.info(`任务 ${task.name} 已启用，重新设置定时任务`)
+      } else if (!enabled && oldEnabled) {
+        // 从启用变为禁用：取消定时任务
+        logger.info(`任务 ${task.name} 从启用变为禁用，取消定时任务`)
+        unscheduleTask(task.id)
+        logger.info(`任务 ${task.name} 已禁用，取消定时任务`)
+      }
+
+      // 显示当前状态
+      debugScheduledTasks()
+    }
+
+    // 记录审计日志
+    await logAuditEvent(
+      req.user?.id || 'system',
+      enabled ? 'ENABLE_TASK' : 'DISABLE_TASK',
+      'task_management',
+      {
+        taskId: id,
+        taskName: task.name,
+        previousState: oldEnabled,
+        newState: enabled
+      },
+      'info',
+      req
+    );
+
+    res.json({
+      success: true,
+      message: `任务${enabled ? '启用' : '禁用'}成功`,
+      data: {
+        id: task.id,
+        name: task.name,
+        enabled: task.enabled
+      }
+    })
+  } catch (error) {
+    logger.error('切换任务状态失败', error)
+    res.status(500).json({
+      success: false,
+      message: '切换任务状态失败'
+    })
+  }
+})
+
+// 获取定时任务状态
+router.get('/schedule/status', async (req, res) => {
+  try {
+    const tasks = await readTasks()
+    const scheduleStatus = []
+
+    for (const task of tasks) {
+      if (task.schedule && task.schedule.triggerType !== 'manual') {
+        const isRunning = scheduledTasks.has(task.id)
+        scheduleStatus.push({
+          taskId: task.id,
+          taskName: task.name,
+          triggerType: task.schedule.triggerType,
+          cronExpression: task.schedule.cronExpression,
+          interval: task.schedule.interval,
+          enabled: task.enabled,
+          isScheduled: isRunning
+        })
+      }
+    }
+
+    res.json({
+      success: true,
+      message: '获取定时任务状态成功',
+      data: {
+        totalScheduled: scheduledTasks.size,
+        tasks: scheduleStatus
+      }
+    })
+  } catch (error) {
+    logger.error('获取定时任务状态失败', error)
+    res.status(500).json({
+      success: false,
+      message: '获取定时任务状态失败'
+    })
+  }
+})
+
+// 清理所有定时任务（服务器关闭时使用）
+const cleanupAllScheduledTasks = () => {
+  logger.info(`开始清理所有定时任务，当前任务数: ${scheduledTasks.size}`)
+
+  for (const [taskId, scheduledTask] of scheduledTasks) {
+    try {
+      if (typeof scheduledTask.destroy === 'function') {
+        scheduledTask.destroy()
+      } else if (typeof scheduledTask === 'number') {
+        clearInterval(scheduledTask)
+      }
+      logger.info(`已清理定时任务: ${taskId}`)
+    } catch (error) {
+      logger.error(`清理定时任务失败: ${taskId}`, error)
+    }
+  }
+
+  scheduledTasks.clear()
+  logger.info('所有定时任务已清理完成')
+}
+
+// 监听进程退出事件，清理定时任务
+process.on('SIGINT', () => {
+  logger.info('收到 SIGINT 信号，正在清理定时任务...')
+  cleanupAllScheduledTasks()
+  process.exit(0)
+})
+
+process.on('SIGTERM', () => {
+  logger.info('收到 SIGTERM 信号，正在清理定时任务...')
+  cleanupAllScheduledTasks()
+  process.exit(0)
+})
+
+// 强制重新加载所有定时任务
+router.post('/schedule/reload', async (req, res) => {
+  try {
+    logger.info('开始强制重新加载所有定时任务')
+
+    // 清理所有现有的定时任务
+    cleanupAllScheduledTasks()
+
+    // 重新加载任务
+    const tasks = await readTasks()
+    let reloadedCount = 0
+
+    for (const task of tasks) {
+      if (task.enabled && task.schedule && task.schedule.triggerType !== 'manual') {
+        try {
+          scheduleTask(task, task.schedule, true) // 跳过内部的unschedule
+          reloadedCount++
+          logger.info(`重新加载定时任务: ${task.name} (${task.schedule.triggerType})`)
+        } catch (error) {
+          logger.error(`重新加载任务 ${task.name} 的定时任务失败`, error)
+        }
+      }
+    }
+
+    logger.info(`定时任务重新加载完成，共重新加载 ${reloadedCount} 个定时任务`)
+    debugScheduledTasks()
+
+    res.json({
+      success: true,
+      message: '定时任务重新加载成功',
+      data: {
+        totalTasks: tasks.length,
+        reloadedCount,
+        currentScheduledCount: scheduledTasks.size
+      }
+    })
+  } catch (error) {
+    logger.error('重新加载定时任务失败', error)
+    res.status(500).json({
+      success: false,
+      message: '重新加载定时任务失败'
+    })
+  }
+})
+
+// 验证定时任务一致性接口
+router.get('/schedule/validate', async (req, res) => {
+  try {
+    const result = await validateScheduledTasksConsistency()
+
+    if (!result) {
+      return res.status(500).json({
+        success: false,
+        message: '一致性验证失败'
+      })
+    }
+
+    res.json({
+      success: true,
+      message: result.consistent ? '定时任务一致性验证通过' : '发现定时任务不一致',
+      data: result
+    })
+  } catch (error) {
+    logger.error('验证定时任务一致性失败', error)
+    res.status(500).json({
+      success: false,
+      message: '验证定时任务一致性失败'
+    })
+  }
+})
 
 export default router
