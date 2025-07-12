@@ -8,9 +8,9 @@ const projectInfo = ref({
   title: APP_TITLE,
   version: APP_VERSION,
   description: 'Linux 服务器管理面板 - 基于Vue3+TypeScript+Node.js的现代化服务器监控与管理平台',
-  author: 'Trubin',
+  author: 'Server Panel Team',
   license: 'MIT',
-  repository: 'https://github.com/server-panel-team/linux-server-panel',
+  repository: 'https://github.com/DTrubin/linux-server-panel',
   buildDate: '2025年7月',
   environment: 'Production Ready'
 })
