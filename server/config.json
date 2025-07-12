@@ -1,0 +1,6 @@
+{
+    "adminDefaultPassword": "123456",
+    "port": 3000,
+    "wsPort": 3001,
+    "staticPort": 443
+}

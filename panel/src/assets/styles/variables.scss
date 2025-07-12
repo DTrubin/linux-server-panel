@@ -1,0 +1,14 @@
+// 布局变量
+$sidebarWidth: 160px;
+$sidebarCollapseWidth: 54px;
+$navbarHeight: 50px;
+$tagsViewHeight: 34px;
+$sidebarCollapseTransitionDuration: 0.28s;
+
+:root {
+  --sidebar-width: #{$sidebarWidth};
+  --sidebar-collapse-width: #{$sidebarCollapseWidth};
+  --navbar-height: #{$navbarHeight};
+  --tags-view-height: #{$tagsViewHeight};
+  --sidebar-collapse-transition-duration: #{$sidebarCollapseTransitionDuration};
+}
