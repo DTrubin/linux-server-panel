@@ -6,7 +6,8 @@ import fs from 'fs'
 import helmet from 'helmet'
 import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
-import { createServer } from 'https'
+import https from 'https'
+import http from 'http'
 import { WebSocketServer } from 'ws'
 
 // ========== 中间件导入 ==========
@@ -36,8 +37,8 @@ const options = {
   cert: fs.readFileSync('cert.pem'),
 }
 const PORT = global.__config.port || 3000
-const WS_PORT = global.__config.wsPort || 3001
-const server = createServer(options, app)
+const protocol = global.__config.protocol === 'https' ? https : http
+const server = protocol.createServer(options, app)
 const wss = new WebSocketServer({ server })
 
 // ========== 安全中间件配置 ==========
@@ -130,7 +131,7 @@ const startServer = async () => {
         pid: process.pid
       }
 
-      logger.info(`https://127.0.0.1:${PORT}`);
+      logger.info(`接口已启动 ${global.__config.protocol}://127.0.0.1:${PORT}`);
       logger.info(`环境: ${startupInfo.environment}`);
 
       // 使用全局logger记录启动信息
@@ -155,12 +156,14 @@ const gracefulShutdown = async (signal) => {
 
   // 关闭WebSocket连接
   wsLogger.info('正在关闭WebSocket连接...');
+  logger.info('正在关闭WebSocket连接...');
   const closePromises = [];
   wss.clients.forEach(client => {
     if (client.readyState === client.OPEN) {
       closePromises.push(new Promise((resolve) => {
         const timeout = setTimeout(() => {
           wsLogger.warn('WebSocket连接关闭超时，强制终止');
+          logger.warn('WebSocket连接关闭超时，强制终止');
           client.terminate();
           resolve();
         }, 5000); // 5秒超时
@@ -191,6 +194,7 @@ const gracefulShutdown = async (signal) => {
   const wsClosePromise = new Promise((resolve) => {
     wss.close(() => {
       wsLogger.info('WebSocket服务器已关闭');
+      logger.info('WebSocket服务器已关闭');
       resolve();
     });
   });

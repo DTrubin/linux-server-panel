@@ -1,7 +1,8 @@
 import express from 'express'
 import fs from 'fs'
 import path from 'path'
-import { createServer } from 'https'
+import https from 'https'
+import http from 'http'
 
 const app = express()
 const options = {
@@ -9,10 +10,10 @@ const options = {
     cert: fs.readFileSync('cert.pem'),
 }
 
-const PORT = global.__config.staticPort || 8080
+const PORT = global.__config.staticPort
 const logger = global.logger
-
-const server = createServer(options, app)
+const protocol = global.__config.protocol === 'https' ? https : http
+const server = protocol.createServer(options, app)
 
 // ========== 静态文件服务 ==========
 app.use('/', express.static('../panel/dist'))
@@ -26,7 +27,7 @@ app.use('*', (req, res) => {
 
 export async function startStaticServer() {
     server.listen(PORT, () => {
-        logger.info(`静态文件服务已启动: https://127.0.0.1:${PORT}`)
+        logger.info(`静态文件服务已启动: ${global.__config.protocol}://127.0.0.1:${PORT}`)
     })
     server.on('error', (err) => {
         logger.error('启动静态文件服务时出错:', err)

@@ -218,81 +218,6 @@ function handleTerminalConnection(ws, req, parsedUrl) {
 }
 
 /**
- * 处理一般WebSocket连接（非终端）
- */
-function handleGeneralConnection(ws, req) {
-  wsLogger.info('新的一般WebSocket连接已建立', {
-    remoteAddress: req.socket.remoteAddress
-  })
-
-  // 发送欢迎消息
-  const welcomeMessage = {
-    type: 'welcome',
-    message: '连接已建立',
-    timestamp: new Date().toISOString()
-  }
-  ws.send(JSON.stringify(welcomeMessage))
-  wsLogger.info(`发送欢迎消息`, { messageType: 'welcome', dataSize: JSON.stringify(welcomeMessage).length })
-
-  // 处理消息
-  ws.on('message', (data) => {
-    try {
-      const message = JSON.parse(data.toString())
-      wsLogger.debug('收到WebSocket消息', { messageType: message.type, dataSize: data.length })
-
-      // 根据消息类型处理
-      switch (message.type) {
-        case 'ping':
-          const pongMessage = {
-            type: 'pong',
-            timestamp: new Date().toISOString()
-          }
-          ws.send(JSON.stringify(pongMessage))
-          wsLogger.debug(`发送心跳响应`, { messageType: 'pong' })
-          break
-        case 'subscribe':
-          // 处理订阅逻辑
-          const subscribeMessage = {
-            type: 'subscribed',
-            channel: message.channel,
-            timestamp: new Date().toISOString()
-          }
-          ws.send(JSON.stringify(subscribeMessage))
-          wsLogger.info(`发送订阅确认`, { channel: message.channel, messageType: 'subscribed' })
-          break
-        default:
-          const errorMessage = {
-            type: 'error',
-            message: '未知的消息类型',
-            timestamp: new Date().toISOString()
-          }
-          ws.send(JSON.stringify(errorMessage))
-          wsLogger.warn(`发送未知消息类型错误`, { messageType: message.type })
-      }
-    } catch (error) {
-      wsLogger.error('处理WebSocket消息错误', { error: error.message })
-      const errorMessage = {
-        type: 'error',
-        message: '消息格式错误',
-        timestamp: new Date().toISOString()
-      }
-      ws.send(JSON.stringify(errorMessage))
-      wsLogger.error(`发送消息格式错误`, { error: error.message, messageType: 'error' })
-    }
-  })
-
-  // 连接关闭处理
-  ws.on('close', () => {
-    wsLogger.info('一般WebSocket连接已关闭')
-  })
-
-  // 错误处理
-  ws.on('error', (error) => {
-    wsLogger.error('一般WebSocket错误', { error: error.message })
-  })
-}
-
-/**
  * 初始化WebSocket处理器
  */
 function initWebSocketHandlers(wss) {
@@ -336,11 +261,13 @@ function initWebSocketHandlers(wss) {
     // 连接关闭处理
     ws.on('close', (code, reason) => {
       wsLogger.info(`WebSocket连接关闭 - 路径: ${pathname}, IP: ${clientIP}, 代码: ${code}`)
+      logger.info(`WebSocket连接关闭 - 路径: ${pathname}, IP: ${clientIP}, 代码: ${code}`)
     })
 
     // 连接错误处理
     ws.on('error', (error) => {
       wsLogger.error(`WebSocket连接错误 - 路径: ${pathname}, IP: ${clientIP}, 错误: ${error.message}`)
+      logger.error(`WebSocket连接错误 - 路径: ${pathname}, IP: ${clientIP}, 错误: ${error.message}`)
     })
 
     // 记录连接开始时间

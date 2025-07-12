@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon index.js",
+    "dev": "nodemon index.js dev",
     "start": "node index.js",
     "lint": "eslint --config eslint.config.js src/**/*.js --fix",
     "test": "jest"

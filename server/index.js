@@ -5,12 +5,14 @@ import fs from 'fs';
 
 setLog()// 初始化日志
 
+const protocol = process.argv[2]?.includes('dev') ? 'http' : 'https'
 // ========== 配置文件加载 ==========
 const defaultConfig = {
     adminDefaultPassword: '123456',
     port: 3000,
     wsPort: 3001,
-    staticPort: 8080,
+    staticPort: (protocol === 'https' ? 443 : 80),
+    protocol: protocol
 };
 let config = {};
 try {

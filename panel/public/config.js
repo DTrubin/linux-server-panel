@@ -12,7 +12,7 @@ window.APP_CONFIG = {
 
   // WebSocket 服务器配置
   WS_HOST: '',   // 留空则使用当前域名
-  WS_PORT: '',   // 留空则使用当前端口
+  WS_PORT: '3000',   // 留空则使用当前端口
   WS_PROTOCOL: '', // 留空则使用当前协议
 
   // 自定义配置示例：

@@ -33,7 +33,7 @@ const { isConnected: wsConnected, messages, connect, disconnect, sendMessage } =
 
 // 计算属性
 const terminalUrl = (() => {
-  return environmentManager.buildWebSocketUrl(`/terminal/${currentServer.value}`)
+  return environmentManager.buildWebSocketUrl(`/terminal/`)
 })()
 
 // 格式化终端行
