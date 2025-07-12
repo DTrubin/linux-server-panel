@@ -696,8 +696,7 @@ router.put('/update', async (req, res) => {
       id: existingTask.id,
       createdAt: existingTask.createdAt,
       updatedAt: new Date().toISOString(),
-      // 如果没有提供schedule，保持原有的schedule
-      schedule: req.body.schedule || existingTask.schedule || { triggerType: 'manual' }
+      schedule: req.body.schedule || {}
     }
 
     tasks[taskIndex] = updatedTask
